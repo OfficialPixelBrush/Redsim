@@ -6,6 +6,8 @@
 #define WORLD_WIDTH  16
 #define WORLD_HEIGHT 8
 
+int8_t world [WORLD_HEIGHT][WORLD_WIDTH];
+
 // Bit 0-3 Strength
 // Bit 4 Dust
 // Bit 5 Torch
@@ -16,22 +18,36 @@
 #define TORCH    0b00100000 
 #define REPEATER 0b00110000
 #define LEVER    0b01000000
+#define SOLID    0b01010000
 
 #define BLOCK    0b01110000
 #define LEVEL    0b00001111
 
 #define TICKED   0b10000000
 
-#define CHARACTER_DUST "┼"
+#define DUST_CROSS "┼"
+#define DUST_HORIZONTAL "─"
+#define DUST_VERTICAL "│"
+#define DUST_BEND_NE "└"
+#define DUST_BEND_NW "┘"
+#define DUST_BEND_SE "┌"
+#define DUST_BEND_SW "┐"
 
-#define CHARACTER_TORCH "i"
+#define CHARACTER_TORCH_C "🕯"
+#define CHARACTER_TORCH_N "↑"
+#define CHARACTER_TORCH_S "↓"
+#define CHARACTER_TORCH_E "→"
+#define CHARACTER_TORCH_W "←"
 
-#define CHARACTER_REPEATER "="
+#define CHARACTER_REPEATER_N "⇑"
+#define CHARACTER_REPEATER_S "⇓"
+#define CHARACTER_REPEATER_E "⇒"
+#define CHARACTER_REPEATER_W "⇐"
 
 #define CHARACTER_LEVER_OFF "\\"
 #define CHARACTER_LEVER_ON "/"
 
-int8_t world [WORLD_HEIGHT][WORLD_WIDTH];
+#define CHARACTER_BLOCK "█"
 
 void ResetWorld() {
     // Init Empty
@@ -42,10 +58,43 @@ void ResetWorld() {
     }
 }
 
-void PrintBlock(int8_t entry) {
+int8_t GetLevel(int x, int y) {
+    if (x < 0 || x >= WORLD_WIDTH || y < 0 || y >= WORLD_HEIGHT) {
+        return 0;
+    }
+    if ((world[y][x] & BLOCK) == EMPTY) {
+        return 0;
+    }
+    return world[y][x] & LEVEL;
+}
+
+int8_t GetBlock(int x, int y) {
+    if (x < 0 || x >= WORLD_WIDTH || y < 0 || y >= WORLD_HEIGHT) {
+        return 0;
+    }
+
+    return world[y][x] & BLOCK;
+}
+
+void PrintDust(int x, int y) {
+    int8_t north = GetBlock(x  ,y+1);
+    int8_t south = GetBlock(x  ,y-1);
+    int8_t east  = GetBlock(x+1,y  );
+    int8_t west  = GetBlock(x-1,y  );
+    
+    if ((north || south) && (!east && ! west)) {
+        std::cout << DUST_VERTICAL;
+    } else if ((!north && !south) && (east && west)) {
+        std::cout << DUST_HORIZONTAL;
+    } else {
+        std::cout << DUST_CROSS;
+    }
+}
+
+void PrintBlock(int x, int y, int8_t entry) {
     int color = int((entry&LEVEL)*16);
     // Display power level
-    std::cout << "\e[38;2;" << color << ";" << 0 << ";" << 0 << "m";
+    std::cout << "\e[38;2;" << color << ";" << 0 << ";" << 0 << ";48;5;235m";
 
     // Print Character
     switch(entry & BLOCK) {
@@ -53,13 +102,13 @@ void PrintBlock(int8_t entry) {
             std::cout << ".";
             break;
         case DUST:
-            std::cout << CHARACTER_DUST;
+            PrintDust(x,y);
             break;
         case TORCH:
-            std::cout << CHARACTER_TORCH;
+            std::cout << CHARACTER_TORCH_C;
             break;
         case REPEATER:
-            std::cout << CHARACTER_REPEATER;
+            std::cout << CHARACTER_REPEATER_E;
             break;
         case LEVER:
             std::cout << CHARACTER_LEVER_OFF;
@@ -78,20 +127,10 @@ void ShowWorld() {
     for (int y = 0; y < WORLD_HEIGHT; y++) {
         for (int x = 0; x < WORLD_WIDTH; x++) {
             world[y][x] = world[y][x] & ~TICKED;
-            PrintBlock(world[y][x]);
+            PrintBlock(x,y,world[y][x]);
         }
         std::cout << std::endl;
     }
-}
-
-int8_t GetLevel(int x, int y) {
-    if (x < 0 || x >= WORLD_WIDTH || y < 0 || y >= WORLD_HEIGHT) {
-        return 0;
-    }
-    if ((world[y][x] & BLOCK) == EMPTY) {
-        return 0;
-    }
-    return world[y][x] & LEVEL;
 }
 
 int8_t CheckForMostPower(int x, int y) {
@@ -139,15 +178,20 @@ void PlaceBlock(int x, int y, int8_t block, int8_t level = 0) {
 
 int main() {
     ResetWorld();
-    PlaceBlock(15,2,TORCH,15);
+    PlaceBlock(1,3,DUST);
+    PlaceBlock(1,4,DUST);
+    PlaceBlock(1,5,DUST);
     ShowWorld();
-    int i = 0;
+    int i = 1;
     while(true) {
         PlaceBlock(i,2,DUST);
         ShowWorld();
         std::this_thread::sleep_for (std::chrono::milliseconds(100));
-        if (i < 14) {
+        if (i < 15) {
             i++;
+        }
+        if (i == 15) {
+            PlaceBlock(1,1,TORCH,15);
         }
     }
     return 0;
