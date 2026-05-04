@@ -42,9 +42,10 @@ typedef struct Tile Tile;
 #define ON 15
 
 struct Tile {
-    int8_t id = EMPTY;
+    int8_t id    = EMPTY;
     int8_t level = 0;
-    bool ticked = false;
+    int8_t next_level = 0;
+    bool ticked  = false;
 };
 
 struct Tile world [WORLD_HEIGHT][WORLD_WIDTH];
@@ -99,7 +100,7 @@ void SetLevel(int x, int y, int8_t level) {
     if (world[y][x].id == EMPTY) {
         return;
     }
-    world[y][x].level = level;
+    world[y][x].next_level = level;
 }
 
 int8_t GetBlock(int x, int y) {
@@ -183,24 +184,36 @@ void ShowWorld() {
     std::this_thread::sleep_for (std::chrono::milliseconds(100));
 }
 
+int8_t GetLevelForNeighbor(int fromX, int fromY, int toX, int toY) {
+    int8_t id = GetBlock(fromX, fromY);
+    int8_t lvl = GetLevel(fromX, fromY);
+    // Only emit on the output side
+    if (id == REPEATER_N && toY == fromY - 1) return lvl; // outputs south
+    if (id == REPEATER_S && toY == fromY + 1) return lvl; // outputs north
+    if (id == REPEATER_E && toX == fromX + 1) return lvl; // outputs east
+    if (id == REPEATER_W && toX == fromX - 1) return lvl; // outputs west
+    // If it's a repeater but not the output side, emit nothing
+    if (id == REPEATER_N || id == REPEATER_S || id == REPEATER_E || id == REPEATER_W)
+        return 0;
+    // Normal dust attenuation
+    return std::max((int8_t)0, (int8_t)(lvl - 1));
+}
+
 int8_t CheckForMostPower(int x, int y) {
-    int8_t north = GetLevel(x, y + 1);
-    int8_t south = GetLevel(x, y - 1);
-    int8_t east  = GetLevel(x + 1, y);
-    int8_t west  = GetLevel(x - 1, y);
-
-    // Step-by-step max calculation (safe for int8_t)
-    int8_t max_neighbor = std::max(north, std::max(south, std::max(east, west))) - 1;
-
-    // Ensure it doesn’t go below zero
-    max_neighbor = std::max(max_neighbor, (int8_t)0);
-
-    // Compare with current block
-    return std::max(GetLevel(x, y), max_neighbor);
+    int8_t n = GetLevelForNeighbor(x, y+1, x, y);
+    int8_t s = GetLevelForNeighbor(x, y-1, x, y);
+    int8_t e = GetLevelForNeighbor(x+1, y, x, y);
+    int8_t w = GetLevelForNeighbor(x-1, y, x, y);
+    return std::max({n, s, e, w});
 }
 
 void ScheduleTick(int32_t x, int32_t y, int64_t tick) {
-    tickSchedule.push_back(std::pair(PosToHash(x,y),tick));
+    // Don't add duplicates
+    int64_t hash = PosToHash(x, y);
+    for (const auto& entry : tickSchedule) {
+        if (entry.first == hash) return;
+    }
+    tickSchedule.push_back(std::pair(hash, tick));
 }
 
 void TickBlock(int x, int y, bool scheduled = false) {
@@ -213,28 +226,33 @@ void TickBlock(int x, int y, bool scheduled = false) {
 
     switch (GetBlock(x,y)) {
         case DUST:
-            world[y][x].level = CheckForMostPower(x,y);
+            SetLevel(x, y, CheckForMostPower(x, y));
             break;
         case REPEATER_N:
-            if (GetLevel(x,y+1) && scheduled) {
-                SetLevel(x,y-1,ON);
+            if (scheduled) {
+                world[y][x].next_level = GetLevel(x, y+1) ? ON : OFF;
+                TickBlock(x, y-1);
             }
             ScheduleTick(x,y,ticksSinceStart+1);
             break;
         case REPEATER_S:
-            if (GetLevel(x,y-1) && scheduled) {
-                SetLevel(x,y+1,ON);
+            if (scheduled) {
+                world[y][x].next_level = GetLevel(x, y-1) ? ON : OFF;
+                TickBlock(x, y+1);
             }
             ScheduleTick(x,y,ticksSinceStart+1);
+            break;
         case REPEATER_E:
-            if (GetLevel(x-1,y) && scheduled) {
-                SetLevel(x+1,y,ON);
+            if (scheduled) {
+                world[y][x].next_level = GetLevel(x-1, y) ? ON : OFF;
+                TickBlock(x+1, y);
             }
             ScheduleTick(x,y,ticksSinceStart+1);
             break;
         case REPEATER_W:
-            if (GetLevel(x+1,y) && scheduled) {
-                SetLevel(x-1,y,ON);
+            if (scheduled) {
+                SetLevel(x+1, y, GetLevel(x+1, y) ? ON : OFF);
+                TickBlock(x-1, y);
             }
             ScheduleTick(x,y,ticksSinceStart+1);
             break;
@@ -247,6 +265,12 @@ void TickBlock(int x, int y, bool scheduled = false) {
     TickBlock(x  ,y+1);
     TickBlock(x  ,y-1);
     return;
+}
+
+void CommitLevels() {
+    for (int y = 0; y < WORLD_HEIGHT; y++)
+        for (int x = 0; x < WORLD_WIDTH; x++)
+            world[y][x].level = world[y][x].next_level;
 }
 
 void HandleScheduledTicks() {
@@ -302,9 +326,16 @@ int main() {
     PlaceBlock(8,5,DUST);
 
     PlaceBlock(9,5,DUST);
+    PlaceBlock(9,4,EMPTY);
     PlaceBlock(9,5,EMPTY);
     while(true) {
-        PlaceBlock(0,0,EMPTY);
+        // Reset ticked flags without clearing the world
+        for (int y = 0; y < WORLD_HEIGHT; y++)
+            for (int x = 0; x < WORLD_WIDTH; x++)
+                world[y][x].ticked = false;
+        HandleScheduledTicks();
+        ShowWorld();
+        ticksSinceStart++;
     }
     return 0;
 }
